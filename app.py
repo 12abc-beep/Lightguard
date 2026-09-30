@@ -1,5 +1,6 @@
 import os
 
+import requests
 import streamlit as st
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -10,6 +11,7 @@ load_dotenv()
 SYSTEM_PROMPT = """
 你是一个叫做“轻卫士”的校园健康生活管家。你的职责是帮助大学生在生病时进行科学自我照护。
 【绝对红线】：绝对不能提供医学诊断，绝对不能推荐任何具体药物。
+你需要结合当前的天气环境来给出饮食、护理和运动建议。比如降温要提醒加衣，下雨要提醒防滑。
 
 【核心交互规则（非常重要！）】：
 当用户向你描述症状时，**不要立刻输出长篇的护理建议**。
@@ -30,6 +32,30 @@ SYSTEM_PROMPT = """
 
 请语气温和，像学长/学姐一样关心用户。
 """
+
+
+def get_weather():
+    api_key = os.getenv("WEATHER_API_KEY")
+    if not api_key:
+        return None
+
+    try:
+        response = requests.get(
+            "https://restapi.amap.com/v3/weather/weatherInfo",
+            params={"city": "360100", "key": api_key},
+            timeout=5,
+        )
+        response.raise_for_status()
+        data = response.json()
+        if data.get("status") != "1" or not data.get("lives"):
+            raise ValueError(data.get("info", "天气接口未返回有效数据"))
+
+        city = data.get("lives")[0].get("city", "南昌")
+        temperature = data.get("lives")[0].get("temperature", "未知")
+        condition = data.get("lives")[0].get("weather", "未知")
+        return f"【当前环境天气：{city}，温度{temperature}度，{condition}】"
+    except Exception:
+        return None
 
 
 def get_client():
@@ -64,20 +90,31 @@ if user_input:
     with st.chat_message("user"):
         st.markdown(user_input)
 
+    weather_context = get_weather()
+
     try:
         client = get_client()
+        conversation_messages = [
+            dict(message) for message in st.session_state.messages
+        ]
+        if weather_context:
+            conversation_messages[-1]["content"] = (
+                f"{weather_context}\n用户症状：{user_input}"
+            )
 
         response = client.chat.completions.create(
             model="qwen-plus",
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
-                *st.session_state.messages,
+                *conversation_messages,
             ],
             temperature=0.7,
             max_tokens=1000,
         )
 
         reply = response.choices[0].message.content
+        if not weather_context:
+            reply = f"当前天气获取失败。\n\n{reply}"
         st.session_state.messages.append({"role": "assistant", "content": reply})
 
         with st.chat_message("assistant"):
