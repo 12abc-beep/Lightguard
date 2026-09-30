@@ -1,12 +1,7 @@
-import os
-
 import requests
 import streamlit as st
-from dotenv import load_dotenv
 from openai import OpenAI
 
-
-load_dotenv()
 
 SYSTEM_PROMPT = """
 你是一个叫做“轻卫士”的校园健康生活管家。你的职责是帮助大学生在生病时进行科学自我照护。
@@ -35,11 +30,8 @@ SYSTEM_PROMPT = """
 
 
 def get_weather():
-    api_key = os.getenv("WEATHER_API_KEY")
-    if not api_key:
-        return None
-
     try:
+        api_key = st.secrets["WEATHER_API_KEY"]
         response = requests.get(
             "https://restapi.amap.com/v3/weather/weatherInfo",
             params={"city": "360100", "key": api_key},
@@ -60,17 +52,13 @@ def get_weather():
 
 
 def get_client():
-    api_key = os.getenv("API_KEY")
-    base_url = os.getenv("BASE_URL")
+    api_key = st.secrets["API_KEY"]
+    base_url = st.secrets["BASE_URL"]
 
-    if not api_key or not base_url:
-        raise ValueError("请确认 .env 文件中已配置 API_KEY 和 BASE_URL。")
-
-    client = OpenAI(
+    return OpenAI(
         base_url=base_url,
         api_key=api_key,
     )
-    return client
 
 
 st.set_page_config(page_title="轻卫士", page_icon="🏥")
@@ -95,7 +83,10 @@ if user_input:
 
     try:
         client = get_client()
-        conversation_messages = [dict(message) for message in st.session_state.messages]
+        conversation_messages = [
+            dict(message) for message in st.session_state.messages
+        ]
+
         if weather_context:
             conversation_messages[-1]["content"] = (
                 f"{weather_context}\n用户症状：{user_input}"
@@ -114,13 +105,18 @@ if user_input:
         reply = response.choices[0].message.content
         if not weather_context:
             reply = f"当前天气获取失败。\n\n{reply}"
-        st.session_state.messages.append({"role": "assistant", "content": reply})
+
+        st.session_state.messages.append(
+            {"role": "assistant", "content": reply}
+        )
 
         with st.chat_message("assistant"):
             st.markdown(reply)
 
     except Exception as e:
         error_message = f"发生错误：{e}"
-        st.session_state.messages.append({"role": "assistant", "content": error_message})
+        st.session_state.messages.append(
+            {"role": "assistant", "content": error_message}
+        )
         with st.chat_message("assistant"):
             st.error(error_message)
