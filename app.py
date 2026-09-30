@@ -1,12 +1,15 @@
-import requests
+import os
+
 import streamlit as st
+from dotenv import load_dotenv
 from openai import OpenAI
 
+
+load_dotenv()
 
 SYSTEM_PROMPT = """
 你是一个叫做“轻卫士”的校园健康生活管家。你的职责是帮助大学生在生病时进行科学自我照护。
 【绝对红线】：绝对不能提供医学诊断，绝对不能推荐任何具体药物。
-你需要结合当前的天气环境来给出饮食、护理和运动建议。比如降温要提醒加衣，下雨要提醒防滑。
 
 【核心交互规则（非常重要！）】：
 当用户向你描述症状时，**不要立刻输出长篇的护理建议**。
@@ -29,36 +32,18 @@ SYSTEM_PROMPT = """
 """
 
 
-def get_weather():
-    try:
-        api_key = st.secrets["WEATHER_API_KEY"]
-        response = requests.get(
-            "https://restapi.amap.com/v3/weather/weatherInfo",
-            params={"city": "360100", "key": api_key},
-            timeout=5,
-        )
-        response.raise_for_status()
-        data = response.json()
-        if data.get("status") != "1" or not data.get("lives"):
-            raise ValueError(data.get("info", "天气接口未返回有效数据"))
-
-        weather = data["lives"][0]
-        city = weather.get("city", "南昌")
-        temperature = weather.get("temperature", "未知")
-        condition = weather.get("weather", "未知")
-        return f"【当前环境天气：{city}，温度{temperature}度，{condition}】"
-    except Exception:
-        return None
-
-
 def get_client():
-    api_key = st.secrets["API_KEY"]
-    base_url = st.secrets["BASE_URL"]
+    api_key = os.getenv("API_KEY")
+    base_url = os.getenv("BASE_URL")
 
-    return OpenAI(
+    if not api_key or not base_url:
+        raise ValueError("请确认 .env 文件中已配置 API_KEY 和 BASE_URL。")
+
+    client = OpenAI(
         base_url=base_url,
         api_key=api_key,
     )
+    return client
 
 
 st.set_page_config(page_title="轻卫士", page_icon="🏥")
@@ -79,44 +64,27 @@ if user_input:
     with st.chat_message("user"):
         st.markdown(user_input)
 
-    weather_context = get_weather()
-
     try:
         client = get_client()
-        conversation_messages = [
-            dict(message) for message in st.session_state.messages
-        ]
-
-        if weather_context:
-            conversation_messages[-1]["content"] = (
-                f"{weather_context}\n用户症状：{user_input}"
-            )
 
         response = client.chat.completions.create(
             model="qwen-plus",
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
-                *conversation_messages,
+                *st.session_state.messages,
             ],
             temperature=0.7,
             max_tokens=1000,
         )
 
         reply = response.choices[0].message.content
-        if not weather_context:
-            reply = f"当前天气获取失败。\n\n{reply}"
-
-        st.session_state.messages.append(
-            {"role": "assistant", "content": reply}
-        )
+        st.session_state.messages.append({"role": "assistant", "content": reply})
 
         with st.chat_message("assistant"):
             st.markdown(reply)
 
     except Exception as e:
         error_message = f"发生错误：{e}"
-        st.session_state.messages.append(
-            {"role": "assistant", "content": error_message}
-        )
+        st.session_state.messages.append({"role": "assistant", "content": error_message})
         with st.chat_message("assistant"):
             st.error(error_message)
